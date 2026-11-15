@@ -1,0 +1,949 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TerraWatch – Landslide Early Warning & Geotechnical Monitoring</title>
+  <meta name="description"
+    content="Industrial IoT real-time landslide detection and slope stability monitoring dashboard.">
+  <link rel="icon"
+    href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏔️</text></svg>">
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              dark: '#070a13',
+              card: '#0f172a',
+              border: '#334155'
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- MQTT.js Browser Bundle -->
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+  <!-- Custom CSS -->
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+
+<body class="bg-[#070a13] text-slate-100 flex flex-col min-h-screen">
+
+  <!-- ========================================================
+       TOP HEADER
+       ======================================================== -->
+  <header
+    class="bg-[#0b101d]/90 backdrop-blur-md border-b border-slate-800/80 sticky top-0 z-40 px-4 lg:px-8 py-3 transition-colors">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+
+      <!-- Brand & Project Identity -->
+      <div class="flex items-center gap-3.5">
+        <div
+          class="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500/20 via-sky-500/20 to-indigo-500/20 border border-emerald-500/40 flex items-center justify-center shadow-lg shadow-emerald-500/10">
+          <i data-lucide="mountain-snow" class="w-5 h-5 text-emerald-400"></i>
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="text-base font-bold tracking-wider text-white font-mono">TERRAWATCH</span>
+            <span
+              class="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-slate-800 text-sky-400 border border-slate-700 font-mono">IoT
+              v2.4</span>
+          </div>
+          <p class="text-xs text-slate-400 font-medium">Landslide Early Warning & Geotechnical Monitoring</p>
+        </div>
+      </div>
+
+      <!-- Center Status / Live Indicator / Clock -->
+      <div class="flex items-center gap-4 text-xs font-mono">
+        <!-- Live Pulse -->
+        <div class="flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900 border border-slate-800">
+          <span class="relative flex h-2 w-2">
+            <span id="header-live-dot"
+              class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
+          </span>
+          <span id="header-live-text" class="font-bold text-emerald-400">LIVE</span>
+        </div>
+
+        <!-- Mode Badge -->
+        <div id="mode-indicator-badge">
+          <!-- Injected via JS (DEMO MODE or REAL MQTT) -->
+        </div>
+
+        <!-- Digital Clock & Last Update -->
+        <div class="hidden sm:flex flex-col text-right">
+          <span id="live-clock" class="text-slate-200 font-bold text-sm tracking-wide">00:00:00</span>
+          <span class="text-[10px] text-slate-400">Last update: <span id="header-last-update"
+              class="text-slate-300">--:--:--</span></span>
+        </div>
+      </div>
+
+      <!-- Action Controls -->
+      <div class="flex items-center gap-2">
+        <!-- Switch Mode Button -->
+        <button id="btn-toggle-mode"
+          class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-1.5 transition-all shadow-sm"
+          title="Toggle between Real MQTT and Demo Mode">
+          <i data-lucide="zap" class="w-3.5 h-3.5 text-amber-400"></i>
+          <span>Mode</span>
+        </button>
+
+        <!-- Audio Alert Mute -->
+        <button id="btn-audio-mute"
+          class="p-1.5 rounded-lg text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-all"
+          title="Mute/Unmute Audio Alarm">
+          <i data-lucide="volume-2" class="w-4 h-4 text-emerald-400"></i>
+        </button>
+
+        <!-- Threshold Config -->
+        <button id="btn-open-thresholds"
+          class="p-1.5 rounded-lg text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-all"
+          title="Configure Risk Thresholds">
+          <i data-lucide="sliders" class="w-4 h-4 text-sky-400"></i>
+        </button>
+
+        <!-- MQTT Config -->
+        <button id="btn-open-mqtt-config"
+          class="p-1.5 rounded-lg text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-all"
+          title="MQTT Broker Settings">
+          <i data-lucide="radio" class="w-4 h-4 text-indigo-400"></i>
+        </button>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- ========================================================
+       DEMO CONTROLS BAR (Quick Scenario Testing)
+       ======================================================== -->
+  <div id="demo-control-bar" class="bg-slate-900/90 border-b border-slate-800 px-4 py-2 text-xs">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-2 text-slate-300 font-medium">
+        <i data-lucide="flask-conical" class="w-4 h-4 text-amber-400"></i>
+        <span><strong>Quick Scenario Simulation:</strong> Test real-time system responses</span>
+      </div>
+      <div class="flex items-center gap-1.5 flex-wrap">
+        <button data-scenario="SAFE"
+          class="demo-scenario-btn px-2.5 py-1 rounded-md text-xs font-semibold bg-slate-800 hover:bg-emerald-950/60 text-emerald-400 border border-emerald-500/40 flex items-center gap-1.5 transition-all">
+          <span class="w-2 h-2 rounded-full bg-emerald-400"></span> 1. Safe Slope
+        </button>
+        <button data-scenario="WARNING"
+          class="demo-scenario-btn px-2.5 py-1 rounded-md text-xs font-semibold bg-slate-800 hover:bg-amber-950/60 text-amber-400 border border-amber-500/40 flex items-center gap-1.5 transition-all">
+          <span class="w-2 h-2 rounded-full bg-amber-400"></span> 2. Infiltration Warning
+        </button>
+        <button data-scenario="CRITICAL"
+          class="demo-scenario-btn px-2.5 py-1 rounded-md text-xs font-semibold bg-slate-800 hover:bg-rose-950/60 text-rose-300 border border-rose-500/40 flex items-center gap-1.5 transition-all">
+          <span class="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span> 3. Critical Hazard
+        </button>
+        <button data-scenario="DYNAMIC"
+          class="demo-scenario-btn px-2.5 py-1 rounded-md text-xs font-semibold bg-slate-800 hover:bg-sky-950/60 text-sky-400 border border-sky-500/40 flex items-center gap-1.5 transition-all">
+          <i data-lucide="play" class="w-3 h-3 text-sky-400"></i> Dynamic Cycle
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Real MQTT Mode Banner -->
+  <div id="real-mode-info" class="hidden bg-sky-950/40 border-b border-sky-500/30 px-4 py-2 text-xs">
+    <div class="max-w-7xl mx-auto flex items-center justify-between text-sky-300 font-medium">
+      <div class="flex items-center gap-2">
+        <i data-lucide="radio" class="w-4 h-4 text-sky-400 animate-pulse"></i>
+        <span><strong>REAL MQTT MODE</strong> – Subscribing to live telemetry topic <code
+            class="font-mono bg-sky-900/60 px-1 py-0.5 rounded text-sky-200">landslide/node01/telemetry</code></span>
+      </div>
+      <span class="text-[11px] text-sky-400/80">Publish from ESP32 or MQTT client to update in real time</span>
+    </div>
+  </div>
+
+  <!-- MQTT Disconnected Alert Banner -->
+  <div id="mqtt-disconnect-banner" class="hidden bg-rose-950/80 border-b border-rose-500/50 px-4 py-2 text-xs">
+    <div class="max-w-7xl mx-auto flex items-center justify-between text-rose-200">
+      <div class="flex items-center gap-2 font-bold">
+        <i data-lucide="alert-octagon" class="w-4 h-4 text-rose-400"></i>
+        <span>MQTT DISCONNECTED – Telemetry stream paused. Check broker connection.</span>
+      </div>
+      <button onclick="window.TerraWatchAppInstance.setMode('demo')"
+        class="px-2 py-0.5 rounded bg-rose-900 hover:bg-rose-800 text-rose-100 font-mono text-[11px] border border-rose-700">
+        Switch to Demo Mode
+      </button>
+    </div>
+  </div>
+
+  <!-- Station Bar -->
+  <div class="bg-[#090d18] border-b border-slate-800/80 px-4 lg:px-8 py-2">
+    <div class="max-w-7xl mx-auto flex items-center justify-between text-xs text-slate-400 font-mono">
+      <div class="flex items-center gap-2">
+        <i data-lucide="map-pin" class="w-3.5 h-3.5 text-emerald-400"></i>
+        <span class="text-slate-300 font-medium font-sans">Monitoring Station:</span>
+        <span class="text-sky-300">Hill Sector 4B (Western Ghats)</span>
+      </div>
+      <div class="flex items-center gap-4">
+        <span>Hardware: ESP32 Edge Node</span>
+        <span>Sensors: Tilt | Vibration | Moisture | Rain</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================
+       MAIN DASHBOARD CONTENT (Clean & Direct)
+       ======================================================== -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-6 space-y-5">
+
+    <!-- TAB CONTAINER WRAPPER (Preserves app.js compatibility) -->
+    <div id="tab-overview" class="tab-content space-y-5">
+
+      <!-- 1. CENTRAL LANDSLIDE RISK ASSESSMENT HERO CARD -->
+      <section id="risk-status-container"
+        class="industrial-card p-6 border transition-all duration-500 relative overflow-hidden backdrop-blur-md bg-emerald-950/20 border-emerald-500/35">
+        <div class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
+
+          <!-- Left: Dominant Risk Status -->
+          <div class="space-y-3 flex-1">
+            <div class="flex items-center gap-3">
+              <span class="text-xs uppercase tracking-widest font-mono text-slate-400 font-semibold">Landslide Risk
+                Assessment</span>
+              <div id="risk-badge"
+                class="inline-flex items-center gap-2 px-3.5 py-1 rounded-full font-mono text-xs font-bold tracking-widest uppercase border bg-emerald-500/20 text-emerald-300 border-emerald-500">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                SAFE
+              </div>
+            </div>
+
+            <h1 id="risk-headline" class="text-3xl sm:text-4xl font-black tracking-tight text-white font-sans">
+              SLOPE STABLE
+            </h1>
+            <p id="risk-summary" class="text-sm text-slate-300 leading-relaxed max-w-2xl font-normal">
+              All monitored parameters are within safe limits. Baseline ground stability maintained.
+            </p>
+
+            <!-- Trigger Explanation Banner -->
+            <div id="risk-trigger-reason" class="pt-1">
+              <div
+                class="p-3 rounded-lg border border-emerald-500/20 bg-emerald-950/20 flex items-center gap-2 text-xs text-slate-300">
+                <span class="text-emerald-400 text-sm">✓</span>
+                <span>All 4 geotechnical sensors operating below warning thresholds.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Visual Slope Inclinometer Gauge & Alarm Trigger -->
+          <div class="flex items-center gap-5 bg-slate-900/90 p-4 rounded-xl border border-slate-800">
+            <!-- Dynamic Slope Incline Gauge -->
+            <div class="flex flex-col items-center">
+              <span class="text-[10px] text-slate-400 font-mono uppercase tracking-wider mb-1">Slope Incline</span>
+              <div class="slope-indicator-mount bg-slate-950/90 rounded-md border border-slate-800 shadow-inner">
+                <div id="slope-stability-gauge" class="slope-line" style="transform: rotate(-3deg);"></div>
+              </div>
+              <span class="text-[10px] text-slate-500 font-mono mt-1">Calibrated Baseline</span>
+            </div>
+
+            <!-- Siren Alert Status & Quick Test -->
+            <div class="space-y-2 border-l border-slate-800 pl-4">
+              <div class="text-[11px] text-slate-400">
+                <span class="text-slate-500 block mb-0.5">Local Alert:</span>
+                <span id="local-buzzer-status" class="font-mono text-emerald-400 font-semibold block text-xs">READY /
+                  STANDBY</span>
+              </div>
+              <button id="btn-test-alert"
+                class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-1.5 transition-all shadow-sm"
+                title="Sound test alarm siren">
+                <i data-lucide="bell-ring" class="w-3.5 h-3.5 text-amber-400"></i>
+                <span>Test Alarm</span>
+              </button>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- 2. FOUR CORE SENSOR METRIC CARDS -->
+      <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+
+        <!-- CARD 1: SOIL MOISTURE -->
+        <div class="industrial-card p-5 space-y-3 relative group">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <div
+                class="w-8 h-8 rounded-lg bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400">
+                <i data-lucide="droplets" class="w-4 h-4"></i>
+              </div>
+              <span class="text-xs uppercase font-bold tracking-wider text-slate-400">Soil Moisture</span>
+            </div>
+            <div id="card-moisture-status">
+              <span
+                class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">SAFE</span>
+            </div>
+          </div>
+
+          <div class="flex items-baseline justify-between pt-1">
+            <div id="card-moisture-val" class="text-3xl font-black font-mono text-sky-400 tracking-tight">--%</div>
+            <div id="card-moisture-trend" class="text-xs font-mono text-slate-400">
+              <span class="flex items-center gap-1"><i data-lucide="minus" class="w-3 h-3"></i> Steady</span>
+            </div>
+          </div>
+
+          <!-- Progress Bar -->
+          <div class="space-y-1">
+            <div class="sensor-bar-bg">
+              <div id="card-moisture-bar" class="h-full bg-sky-400 rounded-full transition-all duration-300"
+                style="width: 50%;"></div>
+            </div>
+            <div class="flex justify-between text-[10px] text-slate-500 font-mono">
+              <span>0%</span>
+              <span class="text-amber-500/80">Warn: &gt;65%</span>
+              <span class="text-rose-500/80">Crit: &gt;80%</span>
+            </div>
+          </div>
+
+          <div
+            class="flex justify-between items-center text-[10px] text-slate-500 pt-2 border-t border-slate-800/80 font-mono">
+            <span>Ground Saturation</span>
+            <span id="card-moisture-time">--:--:--</span>
+          </div>
+        </div>
+
+        <!-- CARD 2: TILT ANGLE -->
+        <div class="industrial-card p-5 space-y-3 relative group">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <div
+                class="w-8 h-8 rounded-lg bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
+                <i data-lucide="compass" class="w-4 h-4"></i>
+              </div>
+              <span class="text-xs uppercase font-bold tracking-wider text-slate-400">Tilt Angle</span>
+            </div>
+            <div id="card-tilt-status">
+              <span
+                class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">SAFE</span>
+            </div>
+          </div>
+
+          <div class="flex items-baseline justify-between pt-1">
+            <div id="card-tilt-val" class="text-3xl font-black font-mono text-purple-400 tracking-tight">--°</div>
+            <div id="card-tilt-trend" class="text-xs font-mono text-slate-400">
+              <span class="flex items-center gap-1"><i data-lucide="minus" class="w-3 h-3"></i> Steady</span>
+            </div>
+          </div>
+
+          <!-- Progress Bar -->
+          <div class="space-y-1">
+            <div class="sensor-bar-bg">
+              <div id="card-tilt-bar" class="h-full bg-purple-400 rounded-full transition-all duration-300"
+                style="width: 20%;"></div>
+            </div>
+            <div class="flex justify-between text-[10px] text-slate-500 font-mono">
+              <span>0°</span>
+              <span class="text-amber-500/80">Warn: &gt;4.5°</span>
+              <span class="text-rose-500/80">Crit: &gt;8.0°</span>
+            </div>
+          </div>
+
+          <div
+            class="flex justify-between items-center text-[10px] text-slate-500 pt-2 border-t border-slate-800/80 font-mono">
+            <span>Slope Inclinometer</span>
+            <span>MPU6050</span>
+          </div>
+        </div>
+
+        <!-- CARD 3: VIBRATION -->
+        <div class="industrial-card p-5 space-y-3 relative group">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <div
+                class="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                <i data-lucide="activity" class="w-4 h-4"></i>
+              </div>
+              <span class="text-xs uppercase font-bold tracking-wider text-slate-400">Vibration</span>
+            </div>
+            <div id="card-vibration-status">
+              <span
+                class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">SAFE</span>
+            </div>
+          </div>
+
+          <div class="flex items-baseline justify-between pt-1">
+            <div id="card-vibration-val" class="text-3xl font-black font-mono text-emerald-400 tracking-tight">-- dps
+            </div>
+            <div id="card-vibration-trend" class="text-xs font-mono text-slate-400">
+              <span class="flex items-center gap-1"><i data-lucide="minus" class="w-3 h-3"></i> Steady</span>
+            </div>
+          </div>
+
+          <!-- Progress Bar -->
+          <div class="space-y-1">
+            <div class="sensor-bar-bg">
+              <div id="card-vibration-bar" class="h-full bg-emerald-400 rounded-full transition-all duration-300"
+                style="width: 15%;"></div>
+            </div>
+            <div class="flex justify-between text-[10px] text-slate-500 font-mono">
+              <span>0 dps</span>
+              <span class="text-amber-500/80">Warn: &gt;25 dps</span>
+              <span class="text-rose-500/80">Crit: &gt;50 dps</span>
+            </div>
+          </div>
+
+          <div
+            class="flex justify-between items-center text-[10px] text-slate-500 pt-2 border-t border-slate-800/80 font-mono">
+            <span>Peak Gyro Motion</span>
+            <span>MPU6050 (dps)</span>
+          </div>
+        </div>
+
+        <!-- CARD 4: RAIN -->
+        <div class="industrial-card p-5 space-y-3 relative group">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <div
+                class="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
+                <i data-lucide="cloud-rain" class="w-4 h-4"></i>
+              </div>
+              <span class="text-xs uppercase font-bold tracking-wider text-slate-400">Rainfall</span>
+            </div>
+            <div id="card-rain-category">
+              <span
+                class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">LOW</span>
+            </div>
+          </div>
+
+          <div class="flex items-baseline justify-between pt-1">
+            <div id="card-rain-val" class="text-3xl font-black font-mono text-cyan-400 tracking-tight">--%</div>
+            <div id="card-rain-trend" class="text-xs font-mono text-slate-400">
+              <span class="flex items-center gap-1"><i data-lucide="minus" class="w-3 h-3"></i> Steady</span>
+            </div>
+          </div>
+
+          <!-- Progress Bar -->
+          <div class="space-y-1">
+            <div class="sensor-bar-bg">
+              <div id="card-rain-bar" class="h-full bg-cyan-400 rounded-full transition-all duration-300"
+                style="width: 10%;"></div>
+            </div>
+            <div class="flex justify-between text-[10px] text-slate-500 font-mono">
+              <span>0%</span>
+              <span class="text-amber-500/80">Warn: &gt;50%</span>
+              <span class="text-rose-500/80">Crit: &gt;80%</span>
+            </div>
+          </div>
+
+          <div
+            class="flex justify-between items-center text-[10px] text-slate-500 pt-2 border-t border-slate-800/80 font-mono">
+            <span>Precipitation Saturation</span>
+            <span>Rain Probe (%)</span>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- 3. LIVE TELEMETRY CHARTS (2x2 Clean Responsive Grid) -->
+      <section class="space-y-3">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <i data-lucide="activity" class="w-4 h-4 text-sky-400"></i>
+            <h2 class="text-sm font-bold tracking-wide uppercase text-slate-300">Live Telemetry Streams (Recent 60
+              Readings)</h2>
+          </div>
+          <span class="text-xs text-slate-500 font-mono hidden sm:inline">Dashed Orange = Warning | Dashed Red =
+            Critical</span>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+          <!-- Chart 1: Soil Moisture -->
+          <div class="industrial-card p-4 space-y-2">
+            <div class="flex items-center justify-between text-xs">
+              <span class="font-semibold text-slate-300 flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-sky-400"></span> Soil Moisture (%) vs Time
+              </span>
+              <span class="text-slate-500 font-mono text-[11px]">Threshold: 65% / 80%</span>
+            </div>
+            <div class="h-48 w-full">
+              <canvas id="chart-soil-moisture"></canvas>
+            </div>
+          </div>
+
+          <!-- Chart 2: Tilt Angle -->
+          <div class="industrial-card p-4 space-y-2">
+            <div class="flex items-center justify-between text-xs">
+              <span class="font-semibold text-slate-300 flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-purple-400"></span> Tilt Angle (°) vs Time
+              </span>
+              <span class="text-slate-500 font-mono text-[11px]">Threshold: 4.5° / 8.0°</span>
+            </div>
+            <div class="h-48 w-full">
+              <canvas id="chart-tilt"></canvas>
+            </div>
+          </div>
+
+          <!-- Chart 3: Vibration -->
+          <div class="industrial-card p-4 space-y-2">
+            <div class="flex items-center justify-between text-xs">
+              <span class="font-semibold text-slate-300 flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-emerald-400"></span> Vibration (dps) vs Time
+              </span>
+              <span class="text-slate-500 font-mono text-[11px]">Threshold: 25 dps / 50 dps</span>
+            </div>
+            <div class="h-48 w-full">
+              <canvas id="chart-vibration"></canvas>
+            </div>
+          </div>
+
+          <!-- Chart 4: Rain -->
+          <div class="industrial-card p-4 space-y-2">
+            <div class="flex items-center justify-between text-xs">
+              <span class="font-semibold text-slate-300 flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-cyan-400"></span> Rainfall (%) vs Time
+              </span>
+              <span class="text-slate-500 font-mono text-[11px]">Threshold: 50% / 80%</span>
+            </div>
+            <div class="h-48 w-full">
+              <canvas id="chart-rain"></canvas>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- 4. BOTTOM SECTION: RECENT ALERTS FEED & SYSTEM HEALTH -->
+      <section class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+
+        <!-- RECENT ALERTS FEED (2 Columns) -->
+        <div class="lg:col-span-2 industrial-card p-5 space-y-3">
+          <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+            <div class="flex items-center gap-2">
+              <div
+                class="w-7 h-7 rounded-lg bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
+                <i data-lucide="bell" class="w-4 h-4"></i>
+              </div>
+              <div>
+                <h3 class="text-sm font-bold tracking-wide uppercase text-slate-200">Alerts & Events Stream</h3>
+                <p class="text-[11px] text-slate-500 font-mono">Live geotechnical threshold alerts</p>
+              </div>
+            </div>
+
+            <!-- Severity Filter Buttons -->
+            <div
+              class="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-[11px] font-mono">
+              <button data-sev="ALL"
+                class="alert-filter-btn px-2.5 py-0.5 rounded bg-sky-600 text-white font-semibold">ALL</button>
+              <button data-sev="CRITICAL"
+                class="alert-filter-btn px-2.5 py-0.5 rounded text-slate-400 hover:text-slate-200">CRITICAL</button>
+              <button data-sev="WARNING"
+                class="alert-filter-btn px-2.5 py-0.5 rounded text-slate-400 hover:text-slate-200">WARNING</button>
+              <button data-sev="SAFE"
+                class="alert-filter-btn px-2.5 py-0.5 rounded text-slate-400 hover:text-slate-200">NORMAL</button>
+            </div>
+          </div>
+
+          <!-- Dynamic Alert Cards Container -->
+          <div id="alerts-list" class="space-y-2 max-h-52 overflow-y-auto pr-1">
+            <!-- Dynamic entries populated via alerts-manager.js -->
+            <div
+              class="p-3 rounded-lg border border-slate-800 bg-slate-950/60 flex items-center gap-3 text-xs text-slate-400">
+              <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+              <span>System monitoring active. Slope parameters within safe thresholds.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- SYSTEM & SENSOR DIAGNOSTICS (1 Column) -->
+        <div class="industrial-card p-5 space-y-4">
+          <!-- System Link Header -->
+          <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+            <div class="flex items-center gap-2">
+              <div
+                class="w-7 h-7 rounded-lg bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400">
+                <i data-lucide="cpu" class="w-4 h-4"></i>
+              </div>
+              <div>
+                <h3 class="text-sm font-bold tracking-wide uppercase text-slate-200">System Link & Health</h3>
+                <p class="text-[11px] text-slate-500 font-mono">Node & hardware heartbeat</p>
+              </div>
+            </div>
+            <div id="status-mqtt-broker">
+              <span class="text-emerald-400 font-mono text-xs">● Connected</span>
+            </div>
+          </div>
+
+          <div class="space-y-2 text-xs font-mono">
+            <div class="flex items-center justify-between p-2 rounded bg-slate-950/60 border border-slate-800/80">
+              <span class="text-slate-400">ESP32 Node:</span>
+              <span id="status-esp32-node" class="text-emerald-400 font-semibold">Online (ESP32_01)</span>
+            </div>
+
+            <div class="flex items-center justify-between p-2 rounded bg-slate-950/60 border border-slate-800/80">
+              <span class="text-slate-400">Data Stream:</span>
+              <span id="status-sensor-data" class="text-emerald-400">Active</span>
+            </div>
+
+            <div class="flex items-center justify-between p-2 rounded bg-slate-950/60 border border-slate-800/80">
+              <span class="text-slate-400">Link Latency:</span>
+              <span id="status-data-latency" class="text-slate-300">12 ms</span>
+            </div>
+
+            <div class="flex items-center justify-between p-2 rounded bg-slate-950/60 border border-slate-800/80">
+              <span class="text-slate-400">Hardware Buzzer:</span>
+              <span id="local-led-status" class="text-emerald-400">GREEN (NORMAL)</span>
+            </div>
+          </div>
+
+          <!-- MQTT STATUS PANEL (Section 8 of Prompt) -->
+          <div class="pt-3 border-t border-slate-800/80 space-y-2">
+            <div class="flex items-center justify-between">
+              <span
+                class="text-[10px] text-sky-400 font-bold uppercase font-mono tracking-wider flex items-center gap-1">
+                <i data-lucide="radio" class="w-3 h-3 text-sky-400"></i> MQTT Status Panel
+              </span>
+              <div id="mqtt-status-badge">
+                <span
+                  class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-mono">
+                  ● Connected
+                </span>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-1.5 text-[11px] font-mono">
+              <div class="p-1.5 rounded bg-slate-950/50 border border-slate-800/60">
+                <span class="text-slate-500 block text-[9px]">Topic:</span>
+                <span id="mqtt-topic-val" class="text-sky-300 truncate block">landslide/node01/telemetry</span>
+              </div>
+              <div class="p-1.5 rounded bg-slate-950/50 border border-slate-800/60">
+                <span class="text-slate-500 block text-[9px]">Messages:</span>
+                <span id="mqtt-msg-count" class="text-white font-bold">0</span>
+              </div>
+              <div class="p-1.5 rounded bg-slate-950/50 border border-slate-800/60 col-span-2">
+                <span class="text-slate-500 block text-[9px]">Broker URL:</span>
+                <span id="mqtt-broker-val"
+                  class="text-slate-300 text-[10px] truncate block">wss://broker.hivemq.com:8884/mqtt</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Sensor Health Pills -->
+          <div class="pt-2 border-t border-slate-800/80">
+            <span class="text-[10px] text-slate-500 uppercase font-mono tracking-wider block mb-1.5">Sensor Signal
+              Health:</span>
+            <div class="grid grid-cols-2 gap-2 text-[11px]">
+              <div
+                class="flex items-center justify-between px-2 py-1 bg-slate-950/40 rounded border border-slate-800/60">
+                <span class="text-slate-400">Moisture:</span>
+                <span id="health-moisture" class="text-emerald-400">Normal</span>
+              </div>
+              <div
+                class="flex items-center justify-between px-2 py-1 bg-slate-950/40 rounded border border-slate-800/60">
+                <span class="text-slate-400">Tilt:</span>
+                <span id="health-tilt" class="text-emerald-400">Normal</span>
+              </div>
+              <div
+                class="flex items-center justify-between px-2 py-1 bg-slate-950/40 rounded border border-slate-800/60">
+                <span class="text-slate-400">Vibration:</span>
+                <span id="health-vibration" class="text-emerald-400">Normal</span>
+              </div>
+              <div
+                class="flex items-center justify-between px-2 py-1 bg-slate-950/40 rounded border border-slate-800/60">
+                <span class="text-slate-400">Rain:</span>
+                <span id="health-rain" class="text-emerald-400">Normal</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- 5. TELEMETRY DATA HISTORY TABLE (Section 16 of Prompt) -->
+      <section class="industrial-card p-5 space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
+          <div class="flex items-center gap-2.5">
+            <div
+              class="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+              <i data-lucide="database" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <h3 class="text-sm font-bold tracking-wide uppercase text-slate-200">Telemetry History Ledger</h3>
+                <span id="history-count-badge"
+                  class="px-2 py-0.5 rounded-full text-[10px] font-mono bg-slate-800 text-sky-400 border border-slate-700">0
+                  records</span>
+              </div>
+              <p class="text-[11px] text-slate-500 font-mono">Logged readings with parameter attribution, risk status &
+                CSV export</p>
+            </div>
+          </div>
+
+          <!-- Controls & Filters -->
+          <div class="flex flex-wrap items-center gap-2.5 text-xs font-mono">
+            <!-- Filter Risk -->
+            <div class="flex items-center gap-1.5">
+              <span class="text-slate-400">Risk:</span>
+              <select id="filter-history-risk"
+                class="bg-slate-900 border border-slate-800 text-slate-300 rounded px-2.5 py-1 text-xs focus:outline-none focus:border-sky-500">
+                <option value="ALL">All States</option>
+                <option value="SAFE">Safe Only</option>
+                <option value="WARNING">Warning Only</option>
+                <option value="CRITICAL">Critical Only</option>
+              </select>
+            </div>
+
+            <!-- Filter Sensor -->
+            <div class="flex items-center gap-1.5">
+              <span class="text-slate-400">Trigger:</span>
+              <select id="filter-history-sensor"
+                class="bg-slate-900 border border-slate-800 text-slate-300 rounded px-2.5 py-1 text-xs focus:outline-none focus:border-sky-500">
+                <option value="ALL">All Sensors</option>
+                <option value="MOISTURE">Soil Moisture</option>
+                <option value="TILT">Tilt Angle</option>
+                <option value="VIBRATION">Vibration</option>
+                <option value="RAIN">Rain</option>
+              </select>
+            </div>
+
+            <!-- Search -->
+            <input type="text" id="search-history" placeholder="Search history..."
+              class="bg-slate-900 border border-slate-800 text-slate-200 placeholder-slate-500 rounded px-2.5 py-1 text-xs focus:outline-none focus:border-sky-500 w-32 sm:w-44 font-mono">
+
+            <!-- Export CSV Button -->
+            <button id="btn-export-csv"
+              class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 transition-all shadow-sm">
+              <i data-lucide="download" class="w-3.5 h-3.5"></i>
+              <span>Export CSV</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- History Table -->
+        <div class="overflow-x-auto max-h-72 overflow-y-auto rounded-lg border border-slate-800">
+          <table class="w-full text-left text-xs font-mono">
+            <thead
+              class="bg-slate-900/90 text-slate-400 uppercase text-[10px] tracking-wider sticky top-0 border-b border-slate-800">
+              <tr>
+                <th class="py-2.5 px-3">Timestamp</th>
+                <th class="py-2.5 px-3">Moisture</th>
+                <th class="py-2.5 px-3">Tilt</th>
+                <th class="py-2.5 px-3">Vibration</th>
+                <th class="py-2.5 px-3">Rain</th>
+                <th class="py-2.5 px-3">Risk State</th>
+                <th class="py-2.5 px-3">Trigger / Attribution</th>
+              </tr>
+            </thead>
+            <tbody id="history-table-body" class="divide-y divide-slate-800/60 text-slate-300">
+              <tr>
+                <td colspan="7" class="py-4 text-center text-slate-500 font-mono text-xs">
+                  Awaiting telemetry frames...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+    </div>
+
+  </main>
+
+  <!-- ========================================================
+       MODAL: RISK THRESHOLDS CONFIGURATION
+       ======================================================== -->
+  <div id="modal-thresholds"
+    class="hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="industrial-card max-w-lg w-full p-6 space-y-4 border-slate-700 bg-slate-900 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div class="flex items-center gap-2">
+          <i data-lucide="sliders" class="w-5 h-5 text-sky-400"></i>
+          <h3 class="text-base font-bold text-white">Geotechnical Risk Thresholds</h3>
+        </div>
+        <button id="btn-close-thresholds" class="text-slate-400 hover:text-white p-1">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form id="form-thresholds" class="space-y-4 text-xs font-mono">
+        <!-- Moisture -->
+        <div class="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-2">
+          <span class="text-sky-400 font-bold block text-sm">Soil Moisture (%)</span>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-[11px] text-slate-400 block mb-1">Warning (%)</label>
+              <input type="number" step="0.5" id="input-moisture-warn" required
+                class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-amber-300">
+            </div>
+            <div>
+              <label class="text-[11px] text-slate-400 block mb-1">Critical (%)</label>
+              <input type="number" step="0.5" id="input-moisture-crit" required
+                class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-rose-400">
+            </div>
+          </div>
+        </div>
+
+        <!-- Tilt -->
+        <div class="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-2">
+          <span class="text-purple-400 font-bold block text-sm">Tilt Angle (°)</span>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-[11px] text-slate-400 block mb-1">Warning (°)</label>
+              <input type="number" step="0.1" id="input-tilt-warn" required
+                class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-amber-300">
+            </div>
+            <div>
+              <label class="text-[11px] text-slate-400 block mb-1">Critical (°)</label>
+              <input type="number" step="0.1" id="input-tilt-crit" required
+                class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-rose-400">
+            </div>
+          </div>
+        </div>
+
+        <!-- Vibration -->
+        <div class="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-2">
+          <span class="text-emerald-400 font-bold block text-sm">Vibration (dps)</span>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-[11px] text-slate-400 block mb-1">Warning (dps)</label>
+              <input type="number" step="1" id="input-vib-warn" required
+                class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-amber-300">
+            </div>
+            <div>
+              <label class="text-[11px] text-slate-400 block mb-1">Critical (dps)</label>
+              <input type="number" step="1" id="input-vib-crit" required
+                class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-rose-400">
+            </div>
+          </div>
+        </div>
+
+        <!-- Rain -->
+        <div class="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-2">
+          <span class="text-cyan-400 font-bold block text-sm">Rainfall (%)</span>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-[11px] text-slate-400 block mb-1">Warning (%)</label>
+              <input type="number" step="1" id="input-rain-warn" required
+                class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-amber-300">
+            </div>
+            <div>
+              <label class="text-[11px] text-slate-400 block mb-1">Critical (%)</label>
+              <input type="number" step="1" id="input-rain-crit" required
+                class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-rose-400">
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between pt-3 border-t border-slate-800 font-sans">
+          <button type="button" id="btn-reset-thresholds" class="text-xs text-slate-400 hover:text-slate-200">Reset
+            Defaults</button>
+          <div class="flex items-center gap-2">
+            <button type="button" onclick="document.getElementById('modal-thresholds').classList.add('hidden')"
+              class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300">Cancel</button>
+            <button type="submit"
+              class="px-4 py-1.5 rounded-lg text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white">Save
+              Changes</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================================
+       MODAL: MQTT CONFIGURATION
+       ======================================================== -->
+  <div id="modal-mqtt"
+    class="hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="industrial-card max-w-lg w-full p-6 space-y-4 border-slate-700 bg-slate-900 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div class="flex items-center gap-2">
+          <i data-lucide="radio" class="w-5 h-5 text-indigo-400"></i>
+          <h3 class="text-base font-bold text-white">MQTT Broker Connection</h3>
+        </div>
+        <button id="btn-close-mqtt" class="text-slate-400 hover:text-white p-1">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form id="form-mqtt" class="space-y-3 font-mono text-xs">
+        <div>
+          <label class="text-[11px] text-slate-400 block mb-1">WebSocket Broker URL</label>
+          <input type="text" id="input-broker-url" required
+            class="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-sky-300"
+            placeholder="wss://broker.hivemq.com:8884/mqtt">
+        </div>
+
+        <div>
+          <label class="text-[11px] text-slate-400 block mb-1">Telemetry Topic</label>
+          <input type="text" id="input-mqtt-topic" required
+            class="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-white"
+            value="landslide/node01/telemetry">
+        </div>
+
+        <div>
+          <label class="text-[11px] text-slate-400 block mb-1">Client ID</label>
+          <input type="text" id="input-client-id"
+            class="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-slate-300"
+            placeholder="landslide-node-01">
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="text-[11px] text-slate-400 block mb-1">Username (Optional)</label>
+            <input type="text" id="input-mqtt-user"
+              class="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-slate-300"
+              placeholder="anonymous">
+          </div>
+          <div>
+            <label class="text-[11px] text-slate-400 block mb-1">Password (Optional)</label>
+            <input type="password" id="input-mqtt-pass"
+              class="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-slate-300">
+          </div>
+        </div>
+
+        <div class="flex items-center justify-end gap-2 pt-3 border-t border-slate-800 font-sans">
+          <button type="button" onclick="document.getElementById('modal-mqtt').classList.add('hidden')"
+            class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300">Cancel</button>
+          <button type="submit"
+            class="px-4 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white">Connect &
+            Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================================
+       FOOTER
+       ======================================================== -->
+  <footer class="bg-[#070a13] border-t border-slate-800/80 px-4 lg:px-8 py-3 text-xs font-mono text-slate-500">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+      <div>
+        <span class="text-slate-400 font-semibold">TerraWatch Early Warning System</span> – Real-time Landslide
+        Monitoring
+      </div>
+      <div class="flex items-center gap-4">
+        <span>Protocol: MQTT over WebSocket</span>
+        <span>Sensors: Tilt | Vibration | Moisture | Rain</span>
+      </div>
+    </div>
+  </footer>
+
+  <!-- App Scripts -->
+  <script src="js/config.js"></script>
+  <script src="js/audio-alerts.js"></script>
+  <script src="js/risk-engine.js"></script>
+  <script src="js/charts-manager.js"></script>
+  <script src="js/alerts-manager.js"></script>
+  <script src="js/history-manager.js"></script>
+  <script src="js/mqtt-client.js"></script>
+  <script src="js/simulator.js"></script>
+  <script src="js/app.js"></script>
+
+</body>
+
+</html>
